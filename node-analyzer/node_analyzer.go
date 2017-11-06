@@ -1,4 +1,4 @@
-package agent
+package nodeanalyzer
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	logging "github.com/op/go-logging"
 )
 
-var log = logging.MustGetLogger("processor")
+var log = logging.MustGetLogger("nodeanalyzer")
 var logFormatter = logging.MustStringFormatter(
 	` %{level:.1s}%{time:0102 15:04:05.999999} %{pid} %{shortfile}] %{message}`,
 )
@@ -21,13 +21,13 @@ type FileLog struct {
 }
 
 // Processor test processor
-type SnapProcessor struct {
+type NodeAnalyzer struct {
 	Log *FileLog
 }
 
 // NewProcessor generate processor
-func NewProcessor() plugin.Processor {
-	return &SnapProcessor{}
+func NewAnalyzer() plugin.Processor {
+	return &NodeAnalyzer{}
 }
 
 func NewLogger(filesPath string, name string) (*FileLog, error) {
@@ -57,7 +57,7 @@ func NewLogger(filesPath string, name string) (*FileLog, error) {
 }
 
 // Process test process function
-func (p *SnapProcessor) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin.Metric, error) {
+func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin.Metric, error) {
 	metrics := []plugin.Metric{}
 
 	// TODO: put your process logic here
@@ -71,7 +71,7 @@ func (p *SnapProcessor) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugi
 	plugin. Here you define what sorts of config info your plugin
 	needs and/or requires.
 */
-func (p *SnapProcessor) GetConfigPolicy() (plugin.ConfigPolicy, error) {
+func (p *NodeAnalyzer) GetConfigPolicy() (plugin.ConfigPolicy, error) {
 	policy := plugin.NewConfigPolicy()
 	return *policy, nil
 }

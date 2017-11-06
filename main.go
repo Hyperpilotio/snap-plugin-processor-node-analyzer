@@ -20,7 +20,7 @@ limitations under the License.
 package main
 
 import (
-	"github.com/hyperpilotio/snap-average-counter-processor/agent"
+	"github.com/hyperpilotio/snap-plugin-processor-node-analyzer/node-analyzer"
 	"github.com/intelsdi-x/snap-plugin-lib-go/v1/plugin"
 )
 
@@ -31,7 +31,7 @@ const (
 
 func main() {
 	plugin.StartProcessor(
-		agent.NewProcessor(),
+		nodeanalyzer.NewAnalyzer(),
 		pluginName,
 		pluginVersion,
 	)
