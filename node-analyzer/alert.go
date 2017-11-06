@@ -27,11 +27,56 @@ type AlertState struct {
 	IntervalThresholdRatio float32
 }
 
+func (as *AlertState) pruneIntervals() {
+	beginningWindowTime := currentTime - as.AlertConfig.Window.Nanoseconds()
+
+	newBeginningIndex := -1
+	// Prune the intervals to only include intervals within the current window time.
+	// This will update TotalHitInterval to only count intervals that's within
+	// this window.
+	for i, hitInterval := range as.HitIntervals {
+		if hitInterval.StartTime < beginningWindowTime {
+			extraInterval := beginningWindowTime - hitInterval.StartTime
+			if extraInterval > hitInterval.Interval {
+				// This interval is no longer needed
+				newBeginningIndex = i + 1
+				as.TotalHitInterval -= hitInterval.Interval
+			} else {
+				hitInterval.StartTime = beginningWindowTime
+				hitInterval.Interval -= extraInterval
+				as.TotalHitInterval -= extraInterval
+			}
+		} else {
+			break
+		}
+	}
+
+	// Remove intervals that is no longer in window
+	if newBeginningIndex != -1 {
+		if newBeginningIndex == len(as.HitIntervals)-1 {
+			as.HitIntervals = []HitInterval{}
+		} else {
+			as.HitIntervals = as.HitIntervals[newBeginningIndex:]
+		}
+	}
+}
+
 func (as *AlertState) ProcessValue(currentTime int64, value float32) *ThresholdAlert {
 	isAboveThreshold := value >= as.AlertConfig.Threshold
 	if isAboveThreshold {
 		if as.CurrentStartHitTime == 0 {
 			as.CurrentStartHitTime = currentTime
+			return nil
+		}
+
+		// Prune intervals to update TotalHitInterval.
+		as.pruneIntervals()
+
+		// Check if we're over the threshold now.
+		if as.TotalHitInterval+(currentTime-as.CurrentStartHitTime) >=
+			as.AlertConfig.Window.Nanoseconds() {
+			// TODO: Generate alert here
+			return &ThresholdAlert{}
 		}
 
 		return nil
@@ -47,37 +92,7 @@ func (as *AlertState) ProcessValue(currentTime int64, value float32) *ThresholdA
 		as.HitIntervals = append(as.HitIntervals, hitInterval)
 		as.CurrentStartHitTime = 0
 
-		beginningWindowTime := currentTime - as.AlertConfig.Window.Nanoseconds()
-
-		newBeginningIndex := -1
-		// Prune the intervals to only include intervals within the current window time.
-		// This will update TotalHitInterval to only count intervals that's within
-		// this window.
-		for i, hitInterval := range as.HitIntervals {
-			if hitInterval.StartTime < beginningWindowTime {
-				extraInterval := beginningWindowTime - hitInterval.StartTime
-				if extraInterval > hitInterval.Interval {
-					// This interval is no longer needed
-					newBeginningIndex = i + 1
-					as.TotalHitInterval -= hitInterval.Interval
-				} else {
-					hitInterval.StartTime = beginningWindowTime
-					hitInterval.Interval -= extraInterval
-					as.TotalHitInterval -= extraInterval
-				}
-			} else {
-				break
-			}
-		}
-
-		// Remove intervals that is no longer in window
-		if newBeginningIndex != -1 {
-			if newBeginningIndex == len(as.HitIntervals)-1 {
-				as.HitIntervals = []HitInterval{}
-			} else {
-				as.HitIntervals = as.HitIntervals[newBeginningIndex:]
-			}
-		}
+		as.pruneIntervals()
 
 		// Check if interval is over the window * interval threshold
 		if as.TotalHitInterval >= int64(float32(as.AlertConfig.Window.Nanoseconds())*as.IntervalThresholdRatio) {
