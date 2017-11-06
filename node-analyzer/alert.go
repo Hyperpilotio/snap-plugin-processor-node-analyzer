@@ -1,6 +1,9 @@
 package nodeanalyzer
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 type AlertConfig struct {
 	Metric    string
@@ -12,141 +15,80 @@ type AlertConfig struct {
 type ThresholdAlert struct {
 }
 
-type HitInterval struct {
-	StartTime int64
-	Interval  int64
-}
-
 type AlertState struct {
-	AlertConfig            *AlertConfig
-	HitIntervals           []HitInterval
-	TotalHitInterval       int64
-	CurrentStartHitTime    int64
-	IntervalThresholdRatio float32
-
-	PreviousStartTime int64
-	PreviousValue     float32
-}
-
-func (as *AlertState) pruneIntervals(currentTime int64) {
-	beginningWindowTime := currentTime - as.AlertConfig.Window.Nanoseconds()
-
-	newBeginningIndex := -1
-	// Prune the intervals to only include intervals within the current window time.
-	// This will update TotalHitInterval to only count intervals that's within
-	// this window.
-	for i, hitInterval := range as.HitIntervals {
-		if hitInterval.StartTime < beginningWindowTime {
-			extraInterval := beginningWindowTime - hitInterval.StartTime
-			if extraInterval > hitInterval.Interval {
-				// This interval is no longer needed
-				newBeginningIndex = i + 1
-				as.TotalHitInterval -= hitInterval.Interval
-			} else {
-				hitInterval.StartTime = beginningWindowTime
-				hitInterval.Interval -= extraInterval
-				as.TotalHitInterval -= extraInterval
-			}
-		} else {
-			break
-		}
-	}
-
-	// Remove intervals that is no longer in window
-	if newBeginningIndex != -1 {
-		if newBeginningIndex == len(as.HitIntervals)-1 {
-			as.HitIntervals = []HitInterval{}
-		} else {
-			as.HitIntervals = as.HitIntervals[newBeginningIndex:]
-		}
-	}
+	AlertConfig    *AlertConfig
+	Hits           []int64
+	TargetCount    int
+	SampleInterval int64
 }
 
 func (as *AlertState) ProcessValue(currentTime int64, value float32) *ThresholdAlert {
 	isAboveThreshold := value >= as.AlertConfig.Threshold
 	if isAboveThreshold {
-		if as.CurrentStartHitTime == 0 {
-			as.CurrentStartHitTime = currentTime
-			as.PreviousValue = value
-			as.PreviousStartTime = currentTime
-			return nil
+		hitsLength := len(as.Hits)
+		if hitsLength > 0 {
+			// Fill in missing metric points
+			for currentTime-as.Hits[len(as.Hits)-1] >= 2*as.SampleInterval {
+				filledHitTime := as.Hits[len(as.Hits)-1] + as.SampleInterval
+				as.Hits = append(as.Hits, filledHitTime)
+			}
+		}
+
+		// Prune values outside of window
+		windowBeginTime := currentTime - as.AlertConfig.Window.Nanoseconds()
+		lastGoodIndex := -1
+		for i, hit := range as.Hits {
+			if hit >= windowBeginTime {
+				lastGoodIndex = i
+				break
+			}
+		}
+
+		if lastGoodIndex == -1 {
+			// All values are outside of window, clear all values
+			as.Hits = []int64{}
+		} else {
+			as.Hits = as.Hits[lastGoodIndex:]
+		}
+
+		as.Hits = append(as.Hits, currentTime)
+
+		// Check if we should create new alert
+		if len(as.Hits) >= as.TargetCount {
+			return &ThresholdAlert{}
 		}
 	}
-
-	if as.CurrentStartHitTime != 0 {
-		if as.PreviousValue >= as.AlertConfig.Threshold && isAboveThreshold {
-			as.TotalHitInterval += (currentTime - as.PreviousStartTime)
-		}
-		as.PreviousValue = value
-		as.PreviousStartTime = currentTime
-	}
-
-	if as.TotalHitInterval >= as.AlertConfig.Window.Nanoseconds() {
-		// TODO: Fill in details about the alert
-		as.CurrentStartHitTime = 0
-		return &ThresholdAlert{}
-	}
-
-	// if isAboveThreshold {
-	// 	if as.CurrentStartHitTime == 0 {
-	// 		as.CurrentStartHitTime = currentTime
-	// 		return nil
-	// 	}
-
-	// 	// Prune intervals to update TotalHitInterval.
-	// 	as.pruneIntervals(currentTime)
-
-	// 	// Check if we're over the threshold now.
-	// 	if as.TotalHitInterval+(currentTime-as.CurrentStartHitTime) >=
-	// 		as.AlertConfig.Window.Nanoseconds() {
-	// 		// TODO: Generate alert here
-	// 		return &ThresholdAlert{}
-	// 	}
-
-	// 	return nil
-	// }
-
-	// if as.CurrentStartHitTime != 0 {
-	// 	interval := currentTime - as.CurrentStartHitTime
-	// 	hitInterval := HitInterval{
-	// 		Interval:  interval,
-	// 		StartTime: as.CurrentStartHitTime,
-	// 	}
-	// 	as.TotalHitInterval += interval
-	// 	as.HitIntervals = append(as.HitIntervals, hitInterval)
-	// 	as.CurrentStartHitTime = 0
-
-	// 	as.pruneIntervals(currentTime)
-
-	// 	// Check if interval is over the window * interval threshold
-	// 	if as.TotalHitInterval >= int64(float32(as.AlertConfig.Window.Nanoseconds())*as.IntervalThresholdRatio) {
-	// 		// TODO: Fill in details about the alert
-	// 		return &ThresholdAlert{}
-	// 	}
-	// }
 
 	return nil
-
 }
 
 type AlertEvaluator struct {
 	AlertStates map[string]*AlertState
-	Threshold   int
 }
 
-func NewAlertEvaluator(alertConfigs []*AlertConfig, globalThreshold int) *AlertEvaluator {
+func NewAlertEvaluator(alertConfigs []*AlertConfig, alertRatio float64, sampleInterval int64) (*AlertEvaluator, error) {
+	if alertRatio == 0 {
+		return nil, errors.New("Alert ratio has to be larger than zero")
+	}
+
+	if sampleInterval <= 0 {
+		return nil, errors.New("Sample interval has to be larger than zero")
+	}
+
 	alertStates := map[string]*AlertState{}
 	for _, alertConfig := range alertConfigs {
+		targetCount := int(float64(alertConfig.Window.Nanoseconds()/sampleInterval) * alertRatio)
 		alertStates[alertConfig.Metric] = &AlertState{
-			AlertConfig:  alertConfig,
-			HitIntervals: make([]HitInterval, 0),
+			AlertConfig:    alertConfig,
+			Hits:           make([]int64, 0),
+			TargetCount:    targetCount,
+			SampleInterval: sampleInterval,
 		}
 	}
 
 	return &AlertEvaluator{
 		AlertStates: alertStates,
-		Threshold:   globalThreshold,
-	}
+	}, nil
 }
 
 func (ae *AlertEvaluator) ProcessMetric(currentTime int64, metricName string, value float32) *ThresholdAlert {

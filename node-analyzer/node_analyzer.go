@@ -10,7 +10,9 @@ import (
 
 type NodeAnalyzer struct {
 	*AlertConfig
-	GlobalThreshold int
+	AlertEvaluator *AlertEvaluator
+	AlertRatio     float64
+	SampleInterval int64
 }
 
 // NewProcessor generate processor
@@ -35,13 +37,21 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 		}
 	}
 
-	alertEvaluator := NewAlertEvaluator([]*AlertConfig{p.AlertConfig}, p.GlobalThreshold)
+	if p.AlertEvaluator == nil {
+		alertEvaluator, err := NewAlertEvaluator([]*AlertConfig{p.AlertConfig}, p.AlertRatio, p.SampleInterval)
+		if err != nil {
+			return nil, errors.New("Unable to create new alert evaluator: " + err.Error())
+		}
+
+		p.AlertEvaluator = alertEvaluator
+	}
+
 	metrics := []plugin.Metric{}
 	for _, mt := range mts {
 		namespaces := mt.Namespace.Strings()
 		metricName := "/" + strings.Join(namespaces[:len(namespaces)-2], "/")
 		currentTime := mt.Timestamp.UnixNano()
-		thresholdAlert := alertEvaluator.ProcessMetric(currentTime, metricName, mt.Data.(float32))
+		thresholdAlert := p.AlertEvaluator.ProcessMetric(currentTime, metricName, mt.Data.(float32))
 		if thresholdAlert != nil {
 			metrics = append(metrics, mt)
 		}
