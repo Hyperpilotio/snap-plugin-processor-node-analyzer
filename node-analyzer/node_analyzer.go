@@ -2,27 +2,15 @@ package nodeanalyzer
 
 import (
 	"errors"
-	"os"
-	"path"
+	"strings"
+	"time"
 
 	"github.com/intelsdi-x/snap-plugin-lib-go/v1/plugin"
-	logging "github.com/op/go-logging"
 )
 
-var log = logging.MustGetLogger("nodeanalyzer")
-var logFormatter = logging.MustStringFormatter(
-	` %{level:.1s}%{time:0102 15:04:05.999999} %{pid} %{shortfile}] %{message}`,
-)
-
-type FileLog struct {
-	Name    string
-	Logger  *logging.Logger
-	LogFile *os.File
-}
-
-// Processor test processor
 type NodeAnalyzer struct {
-	Log *FileLog
+	*AlertConfig
+	GlobalThreshold int
 }
 
 // NewProcessor generate processor
@@ -30,37 +18,34 @@ func NewAnalyzer() plugin.Processor {
 	return &NodeAnalyzer{}
 }
 
-func NewLogger(filesPath string, name string) (*FileLog, error) {
-	logDirPath := path.Join(filesPath, "log")
-	if _, err := os.Stat(logDirPath); os.IsNotExist(err) {
-		os.Mkdir(logDirPath, 0777)
-	}
-
-	logFilePath := path.Join(logDirPath, name+".log")
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_RDWR, 0666)
-	if err != nil {
-		return nil, errors.New("Unable to create log file:" + err.Error())
-	}
-
-	fileLog := logging.NewLogBackend(logFile, "["+name+"]", 0)
-	fileLogLevel := logging.AddModuleLevel(fileLog)
-	fileLogLevel.SetLevel(logging.ERROR, "")
-	fileLogBackend := logging.NewBackendFormatter(fileLog, logFormatter)
-
-	log.SetBackend(logging.SetBackend(fileLogBackend))
-
-	return &FileLog{
-		Name:    name,
-		Logger:  log,
-		LogFile: logFile,
-	}, nil
-}
-
 // Process test process function
 func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin.Metric, error) {
-	metrics := []plugin.Metric{}
+	if p.AlertConfig == nil {
+		window := cfg["window"].(string)
+		windowTime, err := time.ParseDuration(window)
+		if err != nil {
+			return nil, errors.New("Unable to parse window duration: " + err.Error())
+		}
 
-	// TODO: put your process logic here
+		p.AlertConfig = &AlertConfig{
+			Metric:    cfg["metric"].(string),
+			Window:    windowTime,
+			Type:      cfg["type"].(string),
+			Threshold: cfg["threshold"].(float32),
+		}
+	}
+
+	alertEvaluator := NewAlertEvaluator([]*AlertConfig{p.AlertConfig}, p.GlobalThreshold)
+	metrics := []plugin.Metric{}
+	for _, mt := range mts {
+		namespaces := mt.Namespace.Strings()
+		metricName := "/" + strings.Join(namespaces[:len(namespaces)-2], "/")
+		currentTime := mt.Timestamp.UnixNano()
+		thresholdAlert := alertEvaluator.ProcessMetric(currentTime, metricName, mt.Data.(float32))
+		if thresholdAlert != nil {
+			metrics = append(metrics, mt)
+		}
+	}
 
 	return metrics, nil
 }

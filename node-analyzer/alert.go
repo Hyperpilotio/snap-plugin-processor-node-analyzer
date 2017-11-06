@@ -1,8 +1,6 @@
 package nodeanalyzer
 
-import (
-	"time"
-)
+import "time"
 
 type AlertConfig struct {
 	Metric    string
@@ -25,9 +23,12 @@ type AlertState struct {
 	TotalHitInterval       int64
 	CurrentStartHitTime    int64
 	IntervalThresholdRatio float32
+
+	PreviousStartTime int64
+	PreviousValue     float32
 }
 
-func (as *AlertState) pruneIntervals() {
+func (as *AlertState) pruneIntervals(currentTime int64) {
 	beginningWindowTime := currentTime - as.AlertConfig.Window.Nanoseconds()
 
 	newBeginningIndex := -1
@@ -66,40 +67,63 @@ func (as *AlertState) ProcessValue(currentTime int64, value float32) *ThresholdA
 	if isAboveThreshold {
 		if as.CurrentStartHitTime == 0 {
 			as.CurrentStartHitTime = currentTime
+			as.PreviousValue = value
+			as.PreviousStartTime = currentTime
 			return nil
 		}
-
-		// Prune intervals to update TotalHitInterval.
-		as.pruneIntervals()
-
-		// Check if we're over the threshold now.
-		if as.TotalHitInterval+(currentTime-as.CurrentStartHitTime) >=
-			as.AlertConfig.Window.Nanoseconds() {
-			// TODO: Generate alert here
-			return &ThresholdAlert{}
-		}
-
-		return nil
 	}
 
 	if as.CurrentStartHitTime != 0 {
-		interval := currentTime - as.CurrentStartHitTime
-		hitInterval := HitInterval{
-			Interval:  interval,
-			StartTime: as.CurrentStartHitTime,
+		if as.PreviousValue >= as.AlertConfig.Threshold && isAboveThreshold {
+			as.TotalHitInterval += (currentTime - as.PreviousStartTime)
 		}
-		as.TotalHitInterval += interval
-		as.HitIntervals = append(as.HitIntervals, hitInterval)
-		as.CurrentStartHitTime = 0
-
-		as.pruneIntervals()
-
-		// Check if interval is over the window * interval threshold
-		if as.TotalHitInterval >= int64(float32(as.AlertConfig.Window.Nanoseconds())*as.IntervalThresholdRatio) {
-			// TODO: Fill in details about the alert
-			return &ThresholdAlert{}
-		}
+		as.PreviousValue = value
+		as.PreviousStartTime = currentTime
 	}
+
+	if as.TotalHitInterval >= as.AlertConfig.Window.Nanoseconds() {
+		// TODO: Fill in details about the alert
+		as.CurrentStartHitTime = 0
+		return &ThresholdAlert{}
+	}
+
+	// if isAboveThreshold {
+	// 	if as.CurrentStartHitTime == 0 {
+	// 		as.CurrentStartHitTime = currentTime
+	// 		return nil
+	// 	}
+
+	// 	// Prune intervals to update TotalHitInterval.
+	// 	as.pruneIntervals(currentTime)
+
+	// 	// Check if we're over the threshold now.
+	// 	if as.TotalHitInterval+(currentTime-as.CurrentStartHitTime) >=
+	// 		as.AlertConfig.Window.Nanoseconds() {
+	// 		// TODO: Generate alert here
+	// 		return &ThresholdAlert{}
+	// 	}
+
+	// 	return nil
+	// }
+
+	// if as.CurrentStartHitTime != 0 {
+	// 	interval := currentTime - as.CurrentStartHitTime
+	// 	hitInterval := HitInterval{
+	// 		Interval:  interval,
+	// 		StartTime: as.CurrentStartHitTime,
+	// 	}
+	// 	as.TotalHitInterval += interval
+	// 	as.HitIntervals = append(as.HitIntervals, hitInterval)
+	// 	as.CurrentStartHitTime = 0
+
+	// 	as.pruneIntervals(currentTime)
+
+	// 	// Check if interval is over the window * interval threshold
+	// 	if as.TotalHitInterval >= int64(float32(as.AlertConfig.Window.Nanoseconds())*as.IntervalThresholdRatio) {
+	// 		// TODO: Fill in details about the alert
+	// 		return &ThresholdAlert{}
+	// 	}
+	// }
 
 	return nil
 
