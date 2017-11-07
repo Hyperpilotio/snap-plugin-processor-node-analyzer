@@ -22,6 +22,16 @@ func NewAnalyzer() plugin.Processor {
 
 // Process test process function
 func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin.Metric, error) {
+	if p.SampleInterval == 0 {
+		sampleInterval := cfg["sampleInterval"].(string)
+		sampleIntervalTime, err := time.ParseDuration(sampleInterval)
+		if err != nil {
+			return nil, errors.New("Unable to parse sampleInterval duration: " + err.Error())
+		}
+
+		p.SampleInterval = sampleIntervalTime.Nanoseconds()
+	}
+
 	if p.AlertConfig == nil {
 		window := cfg["window"].(string)
 		windowTime, err := time.ParseDuration(window)

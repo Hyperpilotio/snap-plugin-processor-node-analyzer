@@ -13,12 +13,10 @@ const (
 	THRESHOLD_TYPE = "active_percentage"
 )
 
-var testData1 = []float32{50, 60, 0, 70, 80, 0, 90, 100}
-
-func (p *NodeAnalyzer) getTestMetrics() []plugin.Metric {
+func (p *NodeAnalyzer) getTestMetrics(testData []float32) []plugin.Metric {
 	metrics := []plugin.Metric{}
 	currentStartHitTime := time.Now()
-	for i, data := range testData1 {
+	for i, data := range testData {
 		currentTime := currentStartHitTime.Add(time.Second * time.Duration(i*INTERVAL))
 		metrics = append(metrics, plugin.Metric{
 			Namespace: plugin.Namespace{
@@ -71,6 +69,7 @@ func (p *NodeAnalyzer) getTestConfig() plugin.Config {
 	cfg["window"] = "30s"
 	cfg["threshold"] = float32(50)
 	cfg["type"] = "active_percentage"
+	cfg["sampleInterval"] = "5s"
 	return cfg
 }
 
@@ -96,7 +95,8 @@ func TestProcessor(t *testing.T) {
 	Convey("Test parsing metrics", t, func() {
 		nodeAnalyzer := &NodeAnalyzer{}
 		Convey("Node Analyzer metrics should succesfully parse test metrics", func() {
-			metrics := nodeAnalyzer.getTestMetrics()
+			testData1 := []float32{50, 60, 0, 70, 80, 0, 90, 100}
+			metrics := nodeAnalyzer.getTestMetrics(testData1)
 			cfg := nodeAnalyzer.getTestConfig()
 
 			processMetrics, err := nodeAnalyzer.Process(metrics, cfg)
