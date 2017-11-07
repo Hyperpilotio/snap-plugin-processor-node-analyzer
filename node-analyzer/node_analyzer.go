@@ -9,7 +9,7 @@ import (
 )
 
 type NodeAnalyzer struct {
-	*AlertConfig
+	AlertConfigs   []*AlertConfig
 	AlertEvaluator *AlertEvaluator
 	AlertRatio     float64
 	SampleInterval int64
@@ -17,7 +17,9 @@ type NodeAnalyzer struct {
 
 // NewProcessor generate processor
 func NewAnalyzer() plugin.Processor {
-	return &NodeAnalyzer{}
+	return &NodeAnalyzer{
+		AlertConfigs: make([]*AlertConfig, 0),
+	}
 }
 
 // Process test process function
@@ -32,31 +34,28 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 		p.SampleInterval = sampleIntervalTime.Nanoseconds()
 	}
 
-	if p.AlertConfig == nil {
+	if p.AlertRatio == 0 {
+		p.AlertRatio = cfg["alertRatio"].(float64)
+	}
+
+	if p.AlertConfigs == nil {
 		window := cfg["window"].(string)
 		windowTime, err := time.ParseDuration(window)
 		if err != nil {
 			return nil, errors.New("Unable to parse window duration: " + err.Error())
 		}
 
-		p.AlertConfig = &AlertConfig{
-			Metric:    cfg["metric"].(string),
-			Window:    windowTime,
-			Type:      cfg["type"].(string),
-			Threshold: cfg["threshold"].(float32),
+		for _, metric := range cfg["metrics"].([]string) {
+			p.AlertConfigs = append(p.AlertConfigs, &AlertConfig{
+				Metric:    metric,
+				Window:    windowTime,
+				Threshold: cfg["threshold"].(float32),
+			})
 		}
 	}
 
 	if p.AlertEvaluator == nil {
-		sampleInterval := cfg["sampleInterval"].(string)
-		sampleIntervalTime, err := time.ParseDuration(sampleInterval)
-		if err != nil {
-			return nil, errors.New("Unable to parse sampleInterval duration: " + err.Error())
-		}
-		p.SampleInterval = sampleIntervalTime.Nanoseconds()
-		p.AlertRatio = cfg["alertRatio"].(float64)
-
-		alertEvaluator, err := NewAlertEvaluator([]*AlertConfig{p.AlertConfig}, p.AlertRatio, p.SampleInterval)
+		alertEvaluator, err := NewAlertEvaluator(p.AlertConfigs, p.AlertRatio, p.SampleInterval)
 		if err != nil {
 			return nil, errors.New("Unable to create new alert evaluator: " + err.Error())
 		}
@@ -67,10 +66,13 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 	metrics := []plugin.Metric{}
 	for _, mt := range mts {
 		namespaces := mt.Namespace.Strings()
-		metricName := "/" + strings.Join(namespaces[:len(namespaces)-2], "/")
+		metricPrefix := "/" + strings.Join(namespaces[:len(namespaces)-2], "/")
+		metricType := namespaces[len(namespaces)-1]
+		metricName := metricPrefix + "/" + metricType
 		currentTime := mt.Timestamp.UnixNano()
 		thresholdAlert := p.AlertEvaluator.ProcessMetric(currentTime, metricName, mt.Data.(float32))
 		if thresholdAlert != nil {
+			mt.Data = thresholdAlert.Average
 			metrics = append(metrics, mt)
 		}
 	}
