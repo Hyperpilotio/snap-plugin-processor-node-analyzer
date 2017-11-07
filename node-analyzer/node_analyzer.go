@@ -48,6 +48,14 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 	}
 
 	if p.AlertEvaluator == nil {
+		sampleInterval := cfg["sampleInterval"].(string)
+		sampleIntervalTime, err := time.ParseDuration(sampleInterval)
+		if err != nil {
+			return nil, errors.New("Unable to parse sampleInterval duration: " + err.Error())
+		}
+		p.SampleInterval = sampleIntervalTime.Nanoseconds()
+		p.AlertRatio = cfg["alertRatio"].(float64)
+
 		alertEvaluator, err := NewAlertEvaluator([]*AlertConfig{p.AlertConfig}, p.AlertRatio, p.SampleInterval)
 		if err != nil {
 			return nil, errors.New("Unable to create new alert evaluator: " + err.Error())

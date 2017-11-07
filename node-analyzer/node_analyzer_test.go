@@ -67,6 +67,8 @@ func (p *NodeAnalyzer) getTestConfig() plugin.Config {
 	cfg := plugin.Config{}
 	cfg["metric"] = "/intel/procfs/cpu"
 	cfg["window"] = "30s"
+	cfg["alertRatio"] = float64(0.5)
+	cfg["sampleInterval"] = "10s"
 	cfg["threshold"] = float32(50)
 	cfg["type"] = "active_percentage"
 	cfg["sampleInterval"] = "5s"
@@ -101,7 +103,7 @@ func TestProcessor(t *testing.T) {
 
 			processMetrics, err := nodeAnalyzer.Process(metrics, cfg)
 			So(err, ShouldBeNil)
-			So(len(processMetrics), ShouldEqual, 1)
+			So(len(processMetrics), ShouldEqual, 6)
 		})
 	})
 }
