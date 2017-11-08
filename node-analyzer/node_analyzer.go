@@ -1,83 +1,89 @@
 package nodeanalyzer
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
-	"time"
 
 	"github.com/intelsdi-x/snap-plugin-lib-go/v1/plugin"
 )
 
 type NodeAnalyzer struct {
-	AlertConfigs   []*AlertConfig
-	AlertEvaluator *AlertEvaluator
-	AlertRatio     float64
-	SampleInterval int64
+	DerivedMetrics *DerivedMetrics
+}
+
+type MetricConfigs struct {
+	Configs []DerivedMetricConfig `json:"configs" binding:"required"`
+}
+
+func downloadConfigFile(url string) (*MetricConfigs, error) {
+	response, err := http.Get(url)
+	if err != nil {
+		return nil, errors.New("Unable to download config file: " + err.Error())
+	}
+	defer response.Body.Close()
+
+	decoder := json.NewDecoder(response.Body)
+	configs := MetricConfigs{}
+	if err := decoder.Decode(&configs); err != nil {
+		return nil, errors.New("Unable to decode body: " + err.Error())
+	}
+
+	return &configs, nil
 }
 
 // NewProcessor generate processor
 func NewAnalyzer() plugin.Processor {
-	return &NodeAnalyzer{
-		AlertConfigs: make([]*AlertConfig, 0),
-	}
+	return &NodeAnalyzer{}
 }
 
 // Process test process function
 func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin.Metric, error) {
-	if p.SampleInterval == 0 {
-		sampleInterval := cfg["sampleInterval"].(string)
-		sampleIntervalTime, err := time.ParseDuration(sampleInterval)
+	if p.DerivedMetrics == nil {
+		configUrl, err := cfg.GetString("configUrl")
 		if err != nil {
 			return nil, errors.New("Unable to parse sampleInterval duration: " + err.Error())
 		}
 
-		p.SampleInterval = sampleIntervalTime.Nanoseconds()
-	}
-
-	if p.AlertRatio == 0 {
-		p.AlertRatio = cfg["alertRatio"].(float64)
-	}
-
-	if p.AlertConfigs == nil {
-		window := cfg["window"].(string)
-		windowTime, err := time.ParseDuration(window)
+		configs, err := downloadConfigFile(configUrl)
 		if err != nil {
-			return nil, errors.New("Unable to parse window duration: " + err.Error())
+			return nil, errors.New("Unable to download and deserialize configs: " + err.Error())
 		}
 
-		for _, metric := range cfg["metrics"].([]string) {
-			p.AlertConfigs = append(p.AlertConfigs, &AlertConfig{
-				Metric:    metric,
-				Window:    windowTime,
-				Threshold: cfg["threshold"].(float32),
-			})
-		}
-	}
-
-	if p.AlertEvaluator == nil {
-		alertEvaluator, err := NewAlertEvaluator(p.AlertConfigs, p.AlertRatio, p.SampleInterval)
+		derivedMetrics, err := NewDerivedMetrics(configs.Configs)
 		if err != nil {
-			return nil, errors.New("Unable to create new alert evaluator: " + err.Error())
+			return nil, errors.New("Unable to create derived metrics: " + err.Error())
 		}
 
-		p.AlertEvaluator = alertEvaluator
+		p.DerivedMetrics = derivedMetrics
 	}
 
-	metrics := []plugin.Metric{}
+	newMetrics := []plugin.Metric{}
 	for _, mt := range mts {
-		namespaces := mt.Namespace.Strings()
-		metricPrefix := "/" + strings.Join(namespaces[:len(namespaces)-2], "/")
-		metricType := namespaces[len(namespaces)-1]
-		metricName := metricPrefix + "/" + metricType
 		currentTime := mt.Timestamp.UnixNano()
-		thresholdAlert := p.AlertEvaluator.ProcessMetric(currentTime, metricName, mt.Data.(float32))
-		if thresholdAlert != nil {
-			mt.Data = thresholdAlert.Average
-			metrics = append(metrics, mt)
+		metricName := strings.Join(mt.Namespace.Strings(), "/")
+		derivedMetric := p.DerivedMetrics.ProcessMetric(currentTime, metricName, mt.Data.(float64))
+		if derivedMetric != nil {
+			namespaces := mt.Namespace.Strings()
+			namespaces = append(namespaces, derivedMetric.Name)
+			newMetric := plugin.Metric{
+				Namespace: plugin.NewNamespace(namespaces...),
+				Version:   mt.Version,
+				Tags:      mt.Tags,
+				Timestamp: mt.Timestamp,
+				Data:      derivedMetric.Value,
+			}
+
+			newMetrics = append(newMetrics, newMetric)
 		}
 	}
 
-	return metrics, nil
+	for _, newMetric := range newMetrics {
+		mts = append(mts, newMetric)
+	}
+
+	return mts, nil
 }
 
 /*
@@ -88,5 +94,10 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 */
 func (p *NodeAnalyzer) GetConfigPolicy() (plugin.ConfigPolicy, error) {
 	policy := plugin.NewConfigPolicy()
+	policy.AddNewStringRule([]string{"hyperpilot", "node-analyzer"},
+		"configUrl",
+		false,
+		plugin.SetDefaultString(""))
+
 	return *policy, nil
 }
