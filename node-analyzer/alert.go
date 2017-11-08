@@ -2,7 +2,6 @@ package nodeanalyzer
 
 import (
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -58,7 +57,6 @@ func (as *AlertState) ProcessValue(currentTime int64, value float32) *ThresholdA
 		// Check if we should create new alert
 		if len(as.Hits) >= as.TargetCount {
 			totalInterval := as.Hits[len(as.Hits)-1] - as.Hits[0] + as.SampleInterval
-			fmt.Println("totalInterval:", totalInterval)
 			as.Hits = []int64{}
 			return &ThresholdAlert{
 				Average: float32(time.Duration(as.SampleInterval).Seconds() / time.Duration(totalInterval).Seconds()),
