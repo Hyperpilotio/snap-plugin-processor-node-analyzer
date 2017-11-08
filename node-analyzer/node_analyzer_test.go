@@ -13,16 +13,10 @@ const (
 	INTERVAL = 5
 )
 
-var testMerics = []string{
-	"/intel/procfs/cpu/active_percentage",
-	"/intel/procfs/cpu/iowait_percentage",
-}
-
-func (p *NodeAnalyzer) getTestMetrics(testDatas []float32) []plugin.Metric {
+func (p *NodeAnalyzer) getTestMetrics(testMetrics []string, testDatas []float32) []plugin.Metric {
 	metrics := []plugin.Metric{}
 	currentStartHitTime := time.Now()
-
-	for _, meric := range testMerics {
+	for _, meric := range testMetrics {
 		mericUrls := strings.Split(meric, "/")
 		for i, data := range testDatas {
 			currentTime := currentStartHitTime.Add(time.Second * time.Duration(i*INTERVAL))
@@ -93,16 +87,33 @@ func TestProcessor(t *testing.T) {
 
 	Convey("Test parsing metrics", t, func() {
 		nodeAnalyzer := &NodeAnalyzer{}
+		configs := []DerivedMetricConfig{
+			DerivedMetricConfig{
+				Metric: "/intel/procfs/cpu/*/active_percentage",
+				Name:   "procfs_cpu",
+				ThresholdBased: &ThresholdBasedConfig{
+					Window:         time.Second * 30,
+					Threshold:      5,
+					SampleInterval: (time.Second * 5).Nanoseconds(),
+				},
+			},
+		}
+
+		derivedMetrics, err := NewDerivedMetrics(configs)
+		So(err, ShouldBeNil)
+		nodeAnalyzer.DerivedMetrics = derivedMetrics
 		Convey("Node Analyzer metrics should succesfully parse test metrics", func() {
 			testDatas := []float32{50, 60, 0, 70, 80, 0, 90, 100}
-			metrics := nodeAnalyzer.getTestMetrics(testDatas)
+			testMetrics := []string{
+				"/intel/procfs/cpu/active_percentage",
+				"/intel/procfs/cpu/iowait_percentage",
+			}
 
-			var cfg = plugin.Config{}
-			cfg["configUrl"] = "https://jpra1113-snap-collectors.s3.amazonaws.com/derivedMetricsConfig.json"
+			metrics := nodeAnalyzer.getTestMetrics(testMetrics, testDatas)
 
-			processMetrics, err := nodeAnalyzer.Process(metrics, cfg)
+			processMetrics, err := nodeAnalyzer.ProcessMetrics(metrics)
 			So(err, ShouldBeNil)
-			So(len(processMetrics), ShouldEqual, 1)
+			So(len(processMetrics), ShouldEqual, 24)
 		})
 	})
 }

@@ -38,6 +38,38 @@ func NewAnalyzer() plugin.Processor {
 	return &NodeAnalyzer{}
 }
 
+func (p *NodeAnalyzer) ProcessMetrics(mts []plugin.Metric) ([]plugin.Metric, error) {
+	newMetrics := []plugin.Metric{}
+	for _, mt := range mts {
+		currentTime := mt.Timestamp.UnixNano()
+		metricName := "/" + strings.Join(mt.Namespace.Strings(), "/")
+		derivedMetric, err := p.DerivedMetrics.ProcessMetric(currentTime, metricName, float64(mt.Data.(float32)))
+		if err != nil {
+			return nil, errors.New("Unable to process metric: " + err.Error())
+		}
+
+		if derivedMetric != nil {
+			namespaces := mt.Namespace.Strings()
+			namespaces = append(namespaces, derivedMetric.Name)
+			newMetric := plugin.Metric{
+				Namespace: plugin.NewNamespace(namespaces...),
+				Version:   mt.Version,
+				Tags:      mt.Tags,
+				Timestamp: mt.Timestamp,
+				Data:      derivedMetric.Value,
+			}
+
+			newMetrics = append(newMetrics, newMetric)
+		}
+	}
+
+	for _, newMetric := range newMetrics {
+		mts = append(mts, newMetric)
+	}
+
+	return mts, nil
+}
+
 // Process test process function
 func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin.Metric, error) {
 	if p.DerivedMetrics == nil {
@@ -59,31 +91,7 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 		p.DerivedMetrics = derivedMetrics
 	}
 
-	newMetrics := []plugin.Metric{}
-	for _, mt := range mts {
-		currentTime := mt.Timestamp.UnixNano()
-		metricName := "/" + strings.Join(mt.Namespace.Strings(), "/")
-		derivedMetric := p.DerivedMetrics.ProcessMetric(currentTime, metricName, float64(mt.Data.(float32)))
-		if derivedMetric != nil {
-			namespaces := mt.Namespace.Strings()
-			namespaces = append(namespaces, derivedMetric.Name)
-			newMetric := plugin.Metric{
-				Namespace: plugin.NewNamespace(namespaces...),
-				Version:   mt.Version,
-				Tags:      mt.Tags,
-				Timestamp: mt.Timestamp,
-				Data:      derivedMetric.Value,
-			}
-
-			newMetrics = append(newMetrics, newMetric)
-		}
-	}
-
-	for _, newMetric := range newMetrics {
-		mts = append(mts, newMetric)
-	}
-
-	return mts, nil
+	return p.ProcessMetrics(mts)
 }
 
 /*

@@ -2,6 +2,7 @@ package nodeanalyzer
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ type DerivedMetric struct {
 
 type DerivedMetricCalculator interface {
 	GetDerivedMetric(currentTime int64, value float64) *DerivedMetric
-	GetConfig() *DerivedMetricConfig
 }
 
 type DerivedMetricConfig struct {
@@ -52,10 +52,6 @@ func NewDerivedMetricCalculator(config *DerivedMetricConfig) (DerivedMetricCalcu
 	}
 
 	return nil, errors.New("No metric config found")
-}
-
-func (tbs *ThresholdBasedState) GetConfig() *DerivedMetricConfig {
-	return tbs.Config
 }
 
 func (tbs *ThresholdBasedState) GetDerivedMetric(currentTime int64, value float64) *DerivedMetric {
@@ -96,52 +92,66 @@ func (tbs *ThresholdBasedState) GetDerivedMetric(currentTime int64, value float6
 	}
 }
 
+type GlobConfig struct {
+	Config  *DerivedMetricConfig
+	Pattern glob.Glob
+}
+
 type DerivedMetrics struct {
-	States map[string]DerivedMetricCalculator
+	States      map[string]DerivedMetricCalculator
+	GlobConfigs []GlobConfig
 }
 
 func NewDerivedMetrics(configs []DerivedMetricConfig) (*DerivedMetrics, error) {
 	states := map[string]DerivedMetricCalculator{}
+	globConfigs := []GlobConfig{}
+
 	for _, config := range configs {
-		calculator, err := NewDerivedMetricCalculator(&config)
-		if err != nil {
-			return nil, errors.New("Unable to create derived metric calculator: " + err.Error())
+		// We assume any metric name with wildcard is a pattern to be matched
+		if strings.Contains(config.Metric, "/*") {
+			pattern, err := glob.Compile(config.Metric)
+			if err != nil {
+				return nil, fmt.Errorf("Unable to compile pattern %s: %s", config.Metric, err.Error())
+			}
+			globConfig := GlobConfig{
+				Config:  &config,
+				Pattern: pattern,
+			}
+			globConfigs = append(globConfigs, globConfig)
+		} else {
+			calculator, err := NewDerivedMetricCalculator(&config)
+			if err != nil {
+				return nil, errors.New("Unable to create derived metric calculator: " + err.Error())
+			}
+			states[config.Metric] = calculator
 		}
-		states[config.Metric] = calculator
 	}
 
 	return &DerivedMetrics{
-		States: states,
+		States:      states,
+		GlobConfigs: globConfigs,
 	}, nil
 }
 
-func (ae *DerivedMetrics) ProcessMetric(currentTime int64, metricName string, value float64) *DerivedMetric {
+func (ae *DerivedMetrics) ProcessMetric(currentTime int64, metricName string, value float64) (*DerivedMetric, error) {
 	state, ok := ae.States[metricName]
 	if !ok {
-		for statesName, calculator := range ae.States {
-			// Assumes the /* wildcard that accepts the last metric
-			if !strings.HasSuffix(statesName, "/*") {
-				continue
-			}
-
-			if isKeywordMatch(metricName, statesName) {
-				calculator, err := NewDerivedMetricCalculator(calculator.GetConfig())
+		for _, globConfig := range ae.GlobConfigs {
+			if globConfig.Pattern.Match(metricName) {
+				calculator, err := NewDerivedMetricCalculator(globConfig.Config)
 				if err != nil {
-					return nil
+					return nil, fmt.Errorf("Unable to create state for metric %s: %s", metricName, err.Error())
 				}
 				ae.States[metricName] = calculator
 				state = calculator
+				break
 			}
 		}
 
 		if state == nil {
-			return nil
+			return nil, nil
 		}
 	}
 
-	return state.GetDerivedMetric(currentTime, value)
-}
-
-func isKeywordMatch(keyword string, pattern string) bool {
-	return glob.MustCompile(pattern).Match(keyword)
+	return state.GetDerivedMetric(currentTime, value), nil
 }
