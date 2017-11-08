@@ -2,7 +2,10 @@ package nodeanalyzer
 
 import (
 	"errors"
+	"strings"
 	"time"
+
+	"github.com/gobwas/glob"
 )
 
 type DerivedMetric struct {
@@ -12,6 +15,7 @@ type DerivedMetric struct {
 
 type DerivedMetricCalculator interface {
 	GetDerivedMetric(currentTime int64, value float64) *DerivedMetric
+	GetConfig() *DerivedMetricConfig
 }
 
 type DerivedMetricConfig struct {
@@ -48,6 +52,10 @@ func NewDerivedMetricCalculator(config *DerivedMetricConfig) (DerivedMetricCalcu
 	}
 
 	return nil, errors.New("No metric config found")
+}
+
+func (tbs *ThresholdBasedState) GetConfig() *DerivedMetricConfig {
+	return tbs.Config
 }
 
 func (tbs *ThresholdBasedState) GetDerivedMetric(currentTime int64, value float64) *DerivedMetric {
@@ -110,8 +118,30 @@ func NewDerivedMetrics(configs []DerivedMetricConfig) (*DerivedMetrics, error) {
 func (ae *DerivedMetrics) ProcessMetric(currentTime int64, metricName string, value float64) *DerivedMetric {
 	state, ok := ae.States[metricName]
 	if !ok {
-		return nil
+		for statesName, calculator := range ae.States {
+			// Assumes the /* wildcard that accepts the last metric
+			if !strings.HasSuffix(statesName, "/*") {
+				continue
+			}
+
+			if isKeywordMatch(metricName, statesName) {
+				calculator, err := NewDerivedMetricCalculator(calculator.GetConfig())
+				if err != nil {
+					return nil
+				}
+				ae.States[metricName] = calculator
+				state = calculator
+			}
+		}
+
+		if state == nil {
+			return nil
+		}
 	}
 
 	return state.GetDerivedMetric(currentTime, value)
+}
+
+func isKeywordMatch(keyword string, pattern string) bool {
+	return glob.MustCompile(pattern).Match(keyword)
 }

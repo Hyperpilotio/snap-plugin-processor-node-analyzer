@@ -62,8 +62,8 @@ func (p *NodeAnalyzer) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugin
 	newMetrics := []plugin.Metric{}
 	for _, mt := range mts {
 		currentTime := mt.Timestamp.UnixNano()
-		metricName := strings.Join(mt.Namespace.Strings(), "/")
-		derivedMetric := p.DerivedMetrics.ProcessMetric(currentTime, metricName, mt.Data.(float64))
+		metricName := "/" + strings.Join(mt.Namespace.Strings(), "/")
+		derivedMetric := p.DerivedMetrics.ProcessMetric(currentTime, metricName, float64(mt.Data.(float32)))
 		if derivedMetric != nil {
 			namespaces := mt.Namespace.Strings()
 			namespaces = append(namespaces, derivedMetric.Name)

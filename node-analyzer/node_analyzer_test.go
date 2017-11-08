@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	INTERVAL = 10
+	INTERVAL = 5
 )
 
 var testMerics = []string{
@@ -72,19 +72,6 @@ func (p *NodeAnalyzer) getTestMetrics(testDatas []float32) []plugin.Metric {
 	return metrics
 }
 
-func (p *NodeAnalyzer) getTestConfig() plugin.Config {
-	cfg := plugin.Config{}
-	cfg["metrics"] = []string{
-		"/intel/procfs/cpu/active_percentage",
-		"/intel/procfs/cpu/iowait_percentage",
-	}
-	cfg["window"] = "80s"
-	cfg["alertRatio"] = float64(0.5)
-	cfg["threshold"] = float32(50)
-	cfg["sampleInterval"] = "5s"
-	return cfg
-}
-
 func TestProcessor(t *testing.T) {
 	Convey("Create Node Analyzer", t, func() {
 		nodeAnalyzer := NewAnalyzer()
@@ -109,7 +96,9 @@ func TestProcessor(t *testing.T) {
 		Convey("Node Analyzer metrics should succesfully parse test metrics", func() {
 			testDatas := []float32{50, 60, 0, 70, 80, 0, 90, 100}
 			metrics := nodeAnalyzer.getTestMetrics(testDatas)
-			cfg := nodeAnalyzer.getTestConfig()
+
+			var cfg = plugin.Config{}
+			cfg["configUrl"] = "https://jpra1113-snap-collectors.s3.amazonaws.com/derivedMetricsConfig.json"
 
 			processMetrics, err := nodeAnalyzer.Process(metrics, cfg)
 			So(err, ShouldBeNil)
