@@ -80,7 +80,6 @@ func (p *NodeAnalyzer) getTestConfig() plugin.Config {
 	}
 	cfg["window"] = "80s"
 	cfg["alertRatio"] = float64(0.5)
-	cfg["sampleInterval"] = "10s"
 	cfg["threshold"] = float32(50)
 	cfg["sampleInterval"] = "5s"
 	return cfg
