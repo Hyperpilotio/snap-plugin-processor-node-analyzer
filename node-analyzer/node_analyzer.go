@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/intelsdi-x/snap-plugin-lib-go/v1/plugin"
@@ -41,9 +42,14 @@ func NewAnalyzer() plugin.Processor {
 func (p *NodeAnalyzer) ProcessMetrics(mts []plugin.Metric) ([]plugin.Metric, error) {
 	newMetrics := []plugin.Metric{}
 	for _, mt := range mts {
+		if mt.Data == nil {
+			continue
+		}
+
 		currentTime := mt.Timestamp.UnixNano()
 		metricName := "/" + strings.Join(mt.Namespace.Strings(), "/")
-		derivedMetric, err := p.DerivedMetrics.ProcessMetric(currentTime, metricName, float64(mt.Data.(float32)))
+		metricData := convertFloat64(mt.Data)
+		derivedMetric, err := p.DerivedMetrics.ProcessMetric(currentTime, metricName, metricData)
 		if err != nil {
 			return nil, errors.New("Unable to process metric: " + err.Error())
 		}
@@ -51,6 +57,9 @@ func (p *NodeAnalyzer) ProcessMetrics(mts []plugin.Metric) ([]plugin.Metric, err
 		if derivedMetric != nil {
 			namespaces := mt.Namespace.Strings()
 			namespaces = append(namespaces, derivedMetric.Name)
+			mt.Tags["derived_metrics_process"] = "true"
+			mt.Tags["average_data"] = strconv.FormatFloat(metricData, 'f', -1, 64)
+
 			newMetric := plugin.Metric{
 				Namespace: plugin.NewNamespace(namespaces...),
 				Version:   mt.Version,
@@ -108,4 +117,27 @@ func (p *NodeAnalyzer) GetConfigPolicy() (plugin.ConfigPolicy, error) {
 		plugin.SetDefaultString(""))
 
 	return *policy, nil
+}
+
+func convertFloat64(data interface{}) float64 {
+	switch data.(type) {
+	case int:
+		return float64(data.(int))
+	case int8:
+		return float64(data.(int8))
+	case int16:
+		return float64(data.(int16))
+	case int32:
+		return float64(data.(int32))
+	case int64:
+		return float64(data.(int64))
+	case uint64:
+		return float64(data.(uint64))
+	case float32:
+		return float64(data.(float32))
+	case float64:
+		return float64(data.(float64))
+	default:
+		return float64(0)
+	}
 }
